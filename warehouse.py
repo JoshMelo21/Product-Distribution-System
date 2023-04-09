@@ -1,6 +1,16 @@
 import pika
 import json
 import sys
+import pymongo
+from datetime import datetime, timedelta
+
+mongo_username = "plazadruben"
+mongo_password = "5tjFpgtRqjjS26QX"
+
+client = pymongo.MongoClient("mongodb+srv://plazadruben:5tjFpgtRqjjS26QX@warehouse-data.lyyeoya.mongodb.net/?retryWrites=true&w=majority")
+db = client["warehouse-data"]
+inventory_db = db["inventory"]
+
 
 # Configuration
 RABBITMQ_HOST = "localhost"
@@ -13,9 +23,21 @@ channel.exchange_declare(exchange="orders", exchange_type="direct")
 channel.exchange_declare(exchange="delivery_schedules", exchange_type="direct")
 
 # Global variables for inventory and vehicle capacities
-inventory = {"tshirt": 500, "xbox": 200, "playstation":213, "sweater": 532, "pants": 1900, "shoes": 123}
+#inventory = {"tshirt": 500, "xbox": 200, "playstation":213, "sweater": 532, "pants": 1900, "shoes": 123}
 warehouse_capacity = 1000
-vehicle_capacity = 50
+vehicle_capacity = 100
+
+# wh_obj = {
+#     "warehouse_id" : WAREHOUSE_ID,
+#     "items": {"tshirt": 500, "xbox": 200, "playstation":213, "sweater": 532, "pants": 1900, "shoes": 123}
+# }
+
+# inventory_db.insert_one(wh_obj);
+
+from_db = inventory_db.find_one({ "warehouse_id": WAREHOUSE_ID })
+
+inventory = from_db["items"]
+
 
 # Delivery vehicle statuses
 delivery_vehicles = {
@@ -32,11 +54,22 @@ def process_order(order):
         #Product doesnt exist error
         return f"Product {product_id} not sold."
     
+    global vehicle_available 
+    vehicle_available = False
+    for vehicle_id, vehicle in delivery_vehicles.items():
+        if vehicle["capacity"] >= quantity:
+            vehicle_available = True
+
+    if not vehicle_available: 
+        return f"No available vehicle for order {order['id']}: {product_id} x {quantity}"
 
     # Check if there is enough inventory for the order
     if inventory[product_id] >= quantity:
         # Update inventory
+        query = {"warehouse_id": WAREHOUSE_ID}
+        new_values = {"$set": {"items": inventory}}
         inventory[product_id] -= quantity
+        inventory_db.update_one(query, new_values)
     else:
         return f"Insufficient inventory for order {order['id']}: {product_id} x {quantity}"
 
@@ -47,11 +80,10 @@ def process_order(order):
             # Assign the order to the vehicle and update the capacity
             vehicle["orders"].append(order["id"])
             vehicle["capacity"] -= quantity
-            return f"Assigned order {order['id']} to {vehicle_id}"
-            
-
+            currentDate = datetime.now().date()
+            deliveryDate = currentDate + timedelta(days=10)
+            return f"Assigned order {order['id']} to {vehicle_id}. Your order will be delivered on {deliveryDate}"
   
-    return f"No available vehicle for order {order['id']}: {product_id} x {quantity}"
 
     # If needed, update the central system and/or the delivery vehicles
 

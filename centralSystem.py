@@ -3,9 +3,26 @@ import json
 import uvicorn
 import sys
 import threading
+import pymongo
 from time import sleep
 from fastapi import FastAPI
 from pydantic import BaseModel
+
+mongo_username = "plazadruben"
+mongo_password = "5tjFpgtRqjjS26QX"
+
+client = pymongo.MongoClient("mongodb+srv://plazadruben:5tjFpgtRqjjS26QX@warehouse-data.lyyeoya.mongodb.net/?retryWrites=true&w=majority")
+db = client["warehouse-data"]
+inventory_db = db["inventory"]
+
+
+from_db = list(inventory_db.find({}))
+
+inventories = {}
+
+for warehouse in from_db:
+    inventories[warehouse["warehouse_id"]] = warehouse["items"]
+
 
 app = FastAPI()
 
@@ -33,6 +50,9 @@ async def create_order(order: Order):
     global return_message
     oldReturnMessage = return_message
     warehouse_id = receive_order_from_customer(order)
+
+    if warehouse_id == "No Warehouse":
+        return {"message": "No Warehouse"}
 
     while oldReturnMessage == return_message:
         sleep(1)
@@ -78,6 +98,8 @@ def send_order_to_warehouse(order, warehouse_id):
 
 def receive_order_from_customer(order):
     warehouse_id = determine_warehouse(order)
+    if warehouse_id == None:
+        return "No Warehouse"
     send_order_to_warehouse(order, warehouse_id)
     return warehouse_id
 
@@ -85,11 +107,26 @@ def receive_order_from_customer(order):
 
 def determine_warehouse(order):
     order_zip_code = order.shipping_address["zip_code"]
+    order_product_id = order.product_id
+    order_quantity = order.quantity
 
     if order_zip_code[0] != "A" and order_zip_code[0] != "B" and order_zip_code[0] != "C":
         return None
     
-    return order_zip_code[0]
+    w_ids = [order_zip_code[0]]
+    if "A" not in w_ids:
+        w_ids.append("A")
+    if "B" not in w_ids:
+        w_ids.append("B")
+    if "C" not in w_ids:
+        w_ids.append("C")
+
+    for i in w_ids:
+        current_inventory = inventories[i]
+        if current_inventory[order_product_id] >= order_quantity:
+            return i
+        
+    return None
 
 def consume_placed_orders(ch, method, properties, body):
     global return_message
